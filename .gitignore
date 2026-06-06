@@ -1,0 +1,16 @@
+.env
+*.sqlite3
+__pycache__/
+tests/__pycache__/
+*.pyc
+jobs.csv
+jobs.html
+jobs_review.csv
+jobs_review.html
+alerts/
+applications/
+answer_bank.json
+discovered_sources.json
+profiles.json
+resumes/*.md
+!resumes/README.md

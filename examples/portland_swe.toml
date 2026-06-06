@@ -1,0 +1,90 @@
+[profile]
+name = "Portland SWE and adjacent search"
+summary = "Software engineering, platform, cloud, DevOps/SRE, infrastructure-adjacent, and technical support roles around Portland, Oregon."
+
+[location]
+target_metro_label = "Portland area"
+target_region_label = "Oregon / SW Washington"
+target_cities = [
+  "portland",
+  "beaverton",
+  "hillsboro",
+  "tigard",
+  "lake oswego",
+  "gresham",
+  "vancouver",
+]
+target_region_terms = [
+  "or",
+  "oregon",
+  "multnomah county",
+  "washington county",
+  "clackamas county",
+  "clark county",
+  "wa",
+]
+remote_us_terms = ["remote", "united states", "usa", "us"]
+non_us_remote_terms = ["india", "canada", "europe", "emea", "apac", "latam", "united kingdom", "uk", "germany"]
+excluded_location_terms = ["washington dc", "district of columbia"]
+
+[roles]
+target_buckets = ["SWE", "Cloud", "DevOps/SRE", "Infrastructure", "Systems", "Operations"]
+
+[apply]
+max_years = 3
+min_resume_match = 3
+min_score = 50
+max_interview_difficulty = 8
+
+[scoring]
+user_strength_terms = [
+  "python",
+  "javascript",
+  "typescript",
+  "react",
+  "node",
+  "sql",
+  "api",
+  "aws",
+  "docker",
+  "linux",
+  "testing",
+  "debugging",
+]
+positive_terms = [
+  "software engineer",
+  "backend",
+  "frontend",
+  "full stack",
+  "python",
+  "javascript",
+  "typescript",
+  "react",
+  "node",
+  "sql",
+  "api",
+  "cloud",
+  "aws",
+  "docker",
+  "linux",
+  "entry level",
+  "new grad",
+  "junior",
+]
+negative_terms = [
+  "senior",
+  "sr.",
+  "staff",
+  "principal",
+  "manager",
+  "director",
+  "5+ years",
+  "7+ years",
+  "10+ years",
+  "unpaid",
+]
+
+[companies]
+tier_1 = ["nike", "intel", "aws", "amazon", "autodesk", "datadog", "cloudflare"]
+tier_2 = ["adobe", "salesforce", "stripe", "github", "microsoft"]
+interesting_terms = ["developer tools", "cloud", "platform", "infrastructure", "saas"]

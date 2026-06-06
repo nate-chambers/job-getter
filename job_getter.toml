@@ -1,0 +1,134 @@
+[profile]
+name = "Nate infrastructure/network search"
+summary = "Seattle-area infrastructure, networking, systems, operations, cloud support, solutions engineering, and sales engineering roles."
+
+[location]
+target_metro_label = "Seattle area"
+target_region_label = "Washington"
+target_cities = [
+  "seattle",
+  "bellevue",
+  "redmond",
+  "kirkland",
+  "renton",
+  "bothell",
+  "everett",
+  "tacoma",
+  "issaquah",
+  "lynnwood",
+  "seatac",
+  "tukwila",
+]
+target_region_terms = [
+  "wa",
+  "washington",
+  "washington state",
+  "king county",
+  "snohomish county",
+  "pierce county",
+]
+remote_us_terms = ["remote", "united states", "usa", "us"]
+non_us_remote_terms = [
+  "india",
+  "canada",
+  "europe",
+  "emea",
+  "apac",
+  "latam",
+  "united kingdom",
+  "uk",
+  "germany",
+  "berlin",
+  "munich",
+  "hamburg",
+  "egypt",
+  "kuwait",
+  "bahrain",
+  "nordics",
+  "calgary",
+  "toronto",
+]
+excluded_location_terms = [
+  "washington dc",
+  "district of columbia",
+  "us-dc washington",
+  "dc office",
+]
+
+[roles]
+target_buckets = [
+  "Infrastructure",
+  "Network",
+  "Systems",
+  "Operations",
+  "Solutions",
+  "Sales Engineer",
+  "Cloud",
+]
+
+[apply]
+max_years = 3
+min_resume_match = 3
+min_score = 55
+max_interview_difficulty = 6
+
+[scoring]
+user_strength_terms = [
+  "linux",
+  "ubuntu",
+  "starlink",
+  "wireless",
+  "wireless networking",
+  "telemetry",
+  "monitoring",
+  "grafana",
+  "sensor",
+  "sensors",
+  "field systems",
+  "environmental",
+  "network troubleshooting",
+  "python",
+  "remote deployment",
+  "remote site",
+  "remote monitoring",
+  "vpn",
+  "zerotier",
+  "mysql",
+]
+positive_terms = [
+  "linux",
+  "networking",
+  "network",
+  "python",
+  "cisco",
+  "ccna",
+  "routing",
+  "switching",
+  "tcp/ip",
+  "dns",
+  "firewall",
+  "troubleshooting",
+  "monitoring",
+  "incident response",
+  "aws",
+  "azure",
+  "gcp",
+]
+negative_terms = [
+  "senior",
+  "sr.",
+  "staff",
+  "principal",
+  "lead engineer",
+  "5+ years",
+  "7+ years",
+  "10+ years",
+  "unpaid",
+  "internship",
+  "airport",
+]
+
+[companies]
+tier_1 = ["f5", "cisco", "juniper", "cloudflare", "t-mobile", "tmobile"]
+tier_2 = ["amazon", "microsoft", "expedia", "meta"]
+interesting_terms = ["msp", "telecom", "utility", "environmental", "monitoring"]

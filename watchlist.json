@@ -1,0 +1,44 @@
+{
+  "companies": [
+    {
+      "company": "F5",
+      "tier": 1,
+      "workday_api_url": "https://ffive.wd5.myworkdayjobs.com/wday/cxs/ffive/f5jobs/jobs",
+      "workday_detail_root": "https://ffive.wd5.myworkdayjobs.com/wday/cxs/ffive/f5jobs",
+      "career_url": "https://ffive.wd5.myworkdayjobs.com/en-US/f5jobs"
+    },
+    {
+      "company": "Cisco",
+      "tier": 1
+    },
+    {
+      "company": "Juniper Networks",
+      "tier": 1
+    },
+    {
+      "company": "Cloudflare",
+      "tier": 1,
+      "greenhouse": "cloudflare"
+    },
+    {
+      "company": "T-Mobile",
+      "tier": 1
+    },
+    {
+      "company": "Amazon",
+      "tier": 2
+    },
+    {
+      "company": "Microsoft",
+      "tier": 2
+    },
+    {
+      "company": "Expedia Group",
+      "tier": 2
+    },
+    {
+      "company": "Meta",
+      "tier": 2
+    }
+  ]
+}

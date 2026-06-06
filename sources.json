@@ -1,0 +1,344 @@
+{
+  "sources": [
+    {
+      "name": "newgrad",
+      "type": "newgrad",
+      "enabled": true,
+      "sleep_seconds": 0.4,
+      "categories": [
+        "us/cyber_security",
+        "us/engineering_development",
+        "us/customer_service",
+        "us/public_sector",
+        "us/sales",
+        "us/consulting"
+      ]
+    },
+    {
+      "name": "cloudflare-greenhouse",
+      "type": "greenhouse",
+      "enabled": true,
+      "mark_missing": true,
+      "company": "Cloudflare",
+      "board": "cloudflare"
+    },
+    {
+      "name": "f5-workday",
+      "type": "workday",
+      "enabled": false,
+      "mark_missing": false,
+      "company": "F5",
+      "api_url": "https://ffive.wd5.myworkdayjobs.com/wday/cxs/ffive/f5jobs/jobs",
+      "detail_root": "https://ffive.wd5.myworkdayjobs.com/wday/cxs/ffive/f5jobs",
+      "career_url": "https://ffive.wd5.myworkdayjobs.com/en-US/f5jobs",
+      "limit": 25,
+      "max_pages": 1,
+      "fetch_details": true,
+      "sleep_seconds": 0.2,
+      "queries": [
+        "network engineer",
+        "infrastructure",
+        "systems engineer",
+        "solutions engineer",
+        "sales engineer",
+        "operations"
+      ]
+    },
+    {
+      "name": "remotive-target-remote",
+      "type": "remotive",
+      "enabled": true,
+      "mark_missing": false,
+      "limit": 100,
+      "keywords": [
+        "infrastructure engineer",
+        "network engineer",
+        "networking",
+        "systems engineer",
+        "system engineer",
+        "technical operations",
+        "operations engineer",
+        "noc",
+        "solutions engineer",
+        "sales engineer",
+        "cloud support",
+        "linux",
+        "cisco",
+        "technical account"
+      ]
+    },
+    {
+      "name": "arbeitnow-remote-supplement",
+      "type": "arbeitnow",
+      "enabled": true,
+      "mark_missing": false,
+      "pages": 2,
+      "remote_required": true,
+      "sleep_seconds": 0.5,
+      "keywords": [
+        "infrastructure",
+        "network",
+        "systems engineer",
+        "technical operations",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer",
+        "cloud support",
+        "linux",
+        "technical account"
+      ]
+    },
+    {
+      "name": "jobicy-usa-remote",
+      "type": "jobicy",
+      "enabled": true,
+      "mark_missing": false,
+      "count": 100,
+      "geo": "usa",
+      "keywords": [
+        "infrastructure",
+        "network",
+        "systems engineer",
+        "technical operations",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer",
+        "cloud support",
+        "linux",
+        "technical account"
+      ]
+    },
+    {
+      "name": "remoteok-target-remote",
+      "type": "remoteok",
+      "enabled": false,
+      "mark_missing": false,
+      "keywords": [
+        "infrastructure",
+        "network",
+        "systems",
+        "technical operations",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer",
+        "cloud support",
+        "linux",
+        "technical account"
+      ]
+    },
+    {
+      "name": "weworkremotely-devops-rss",
+      "type": "rss",
+      "enabled": false,
+      "mark_missing": false,
+      "url": "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
+      "location": "Remote US",
+      "work_model": "Remote",
+      "keywords": [
+        "infrastructure",
+        "network",
+        "systems",
+        "operations",
+        "linux",
+        "cloud",
+        "support"
+      ]
+    },
+    {
+      "name": "themuse-seattle",
+      "type": "themuse",
+      "enabled": false,
+      "mark_missing": false,
+      "pages": 1,
+      "locations": [
+        "Seattle, WA",
+        "Bellevue, WA",
+        "Redmond, WA"
+      ],
+      "queries": [
+        "network engineer",
+        "infrastructure engineer",
+        "systems engineer",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer"
+      ]
+    },
+    {
+      "name": "jobright-2026-engineering-new-grad-github",
+      "type": "github_markdown",
+      "enabled": true,
+      "mark_missing": false,
+      "source_confidence": "low",
+      "url": "https://github.com/jobright-ai/2026-Engineering-New-Grad/blob/master/README.md",
+      "fallback_url": "https://github.com/jobright-ai/2026-Engineering-New-Grad"
+    },
+    {
+      "name": "simplify-new-grad-github",
+      "type": "github_markdown",
+      "enabled": false,
+      "mark_missing": false,
+      "source_confidence": "low",
+      "url": "https://github.com/SimplifyJobs/New-Grad-Positions/blob/dev/README.md",
+      "fallback_url": "https://github.com/SimplifyJobs/New-Grad-Positions"
+    },
+    {
+      "name": "adzuna-seattle",
+      "type": "adzuna",
+      "enabled": true,
+      "mark_missing": false,
+      "country": "us",
+      "results_per_page": 50,
+      "pages": 1,
+      "max_days_old": 30,
+      "locations": [
+        "Seattle, WA",
+        "Bellevue, WA",
+        "Redmond, WA",
+        "Remote"
+      ],
+      "queries": [
+        "infrastructure engineer",
+        "network engineer",
+        "systems engineer",
+        "technical operations engineer",
+        "solutions engineer",
+        "sales engineer",
+        "cloud support engineer"
+      ]
+    },
+    {
+      "name": "usajobs-seattle",
+      "type": "usajobs",
+      "enabled": true,
+      "mark_missing": false,
+      "results_per_page": 50,
+      "locations": [
+        "Seattle, Washington",
+        "Bellevue, Washington",
+        "Redmond, Washington"
+      ],
+      "queries": [
+        "network engineer",
+        "systems engineer",
+        "information technology specialist",
+        "computer engineer"
+      ]
+    },
+    {
+      "name": "findwork-seattle",
+      "type": "findwork",
+      "enabled": true,
+      "mark_missing": false,
+      "retries": 1,
+      "retry_sleep_seconds": 10,
+      "locations": [
+        "Seattle, WA",
+        "Bellevue, WA",
+        "Redmond, WA",
+        "Remote"
+      ],
+      "queries": [
+        "network engineer",
+        "infrastructure engineer",
+        "systems engineer",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer"
+      ]
+    },
+    {
+      "name": "careeronestop-seattle",
+      "type": "careeronestop",
+      "enabled": false,
+      "mark_missing": false,
+      "radius": 25,
+      "days": 30,
+      "page_size": 50,
+      "retries": 1,
+      "retry_sleep_seconds": 5,
+      "auth_scheme": "Bearer",
+      "locations": [
+        "Seattle, WA",
+        "Bellevue, WA",
+        "Redmond, WA"
+      ],
+      "queries": [
+        "network engineer",
+        "infrastructure engineer",
+        "systems engineer",
+        "operations engineer",
+        "solutions engineer",
+        "sales engineer"
+      ]
+    },
+    {
+      "name": "serpapi-google-jobs-seattle",
+      "type": "serpapi_google_jobs",
+      "enabled": false,
+      "mark_missing": false,
+      "locations": [
+        "Seattle, Washington, United States",
+        "Bellevue, Washington, United States",
+        "Redmond, Washington, United States"
+      ],
+      "queries": [
+        "network engineer jobs",
+        "infrastructure engineer jobs",
+        "systems engineer jobs",
+        "operations engineer jobs",
+        "solutions engineer jobs",
+        "sales engineer jobs"
+      ]
+    },
+    {
+      "name": "example-greenhouse",
+      "type": "greenhouse",
+      "enabled": false,
+      "company": "Example Company",
+      "board": "example"
+    },
+    {
+      "name": "example-lever",
+      "type": "lever",
+      "enabled": false,
+      "company": "Example Company",
+      "company_slug": "example"
+    },
+    {
+      "name": "example-ashby",
+      "type": "ashby",
+      "enabled": false,
+      "company": "Example Company",
+      "organization": "example"
+    },
+    {
+      "name": "example-smartrecruiters",
+      "type": "smartrecruiters",
+      "enabled": false,
+      "company": "Example Company",
+      "company_slug": "example"
+    },
+    {
+      "name": "example-workable",
+      "type": "workable",
+      "enabled": false,
+      "company": "Example Company",
+      "account": "example"
+    },
+    {
+      "name": "example-recruitee",
+      "type": "recruitee",
+      "enabled": false,
+      "company": "Example Company",
+      "company_slug": "example"
+    },
+    {
+      "name": "example-bamboohr",
+      "type": "bamboohr",
+      "enabled": false,
+      "company": "Example Company",
+      "subdomain": "example"
+    }
+  ]
+}
