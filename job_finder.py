@@ -17,6 +17,7 @@ import tomllib
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -241,6 +242,18 @@ class ResumeProfile:
     terms: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class LiveVerification:
+    status: str
+    url: str
+    final_url: str
+    page_title: str
+    text: str
+    text_hash: str
+    score: int
+    concerns: str
+
+
 ROLE_BUCKETS = (
     "Infrastructure",
     "Network",
@@ -291,6 +304,8 @@ NON_US_REMOTE_TERMS = (
 HARD_EXCLUDED_TITLE_TERMS = (
     "country director",
     "director",
+    "head of",
+    "leader",
     "manager",
     "senior manager",
     "business analyst",
@@ -298,6 +313,10 @@ HARD_EXCLUDED_TITLE_TERMS = (
     "program manager",
     "coordinator",
     "account executive",
+    "hardware systems engineer",
+    "power system engineer",
+    "quality systems engineer",
+    "systems development engineer",
 )
 
 ARGOS_TERMS = (
@@ -467,7 +486,51 @@ AGGREGATOR_HOST_TERMS = (
     "remotive.com",
     "arbeitnow.com",
     "jobicy.com",
+    "adzuna.com",
+    "builtin.com",
+    "builtinseattle.com",
+    "localjobs.com",
 )
+
+EXPIRED_PAGE_TERMS = (
+    "job expired",
+    "this job has expired",
+    "no longer accepting applications",
+    "no longer available",
+    "position has been filled",
+    "job is no longer available",
+    "sorry, this job has expired",
+)
+
+CLEARANCE_TERMS = (
+    "security clearance",
+    "active clearance",
+    "secret clearance",
+    "top secret",
+    "ts/sci",
+)
+
+COMPANY_SUFFIX_TOKENS = {
+    "inc",
+    "inc.",
+    "llc",
+    "l.l.c",
+    "corp",
+    "corporation",
+    "co",
+    "company",
+    "ltd",
+    "limited",
+    "group",
+    "networks",
+    "technologies",
+    "technology",
+    "systems",
+    "enterprises",
+    "services",
+    "us",
+    "usa",
+}
 
 USER_CONFIG: dict[str, Any] = {}
 
@@ -518,6 +581,15 @@ def config_float(table: str, key: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def config_bool(table: str, key: str, default: bool) -> bool:
+    value = config_table(table).get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
 
 
 def target_cities() -> tuple[str, ...]:
@@ -590,6 +662,73 @@ def user_strength_terms() -> tuple[str, ...]:
     return config_list("scoring", "user_strength_terms", ARGOS_TERMS)
 
 
+def primary_role_terms() -> tuple[str, ...]:
+    return config_list("scoring", "primary_role_terms", PRIMARY_ROLE_TERMS)
+
+
+def customer_engineering_terms() -> tuple[str, ...]:
+    return config_list("scoring", "customer_engineering_terms", CUSTOMER_ENGINEERING_TERMS)
+
+
+def secondary_role_terms() -> tuple[str, ...]:
+    return config_list("scoring", "secondary_role_terms", SECONDARY_ROLE_TERMS)
+
+
+def heavy_devops_terms() -> tuple[str, ...]:
+    return config_list("scoring", "heavy_devops_terms", HEAVY_DEVOPS_TERMS)
+
+
+def hard_excluded_title_terms() -> tuple[str, ...]:
+    return config_list("filters", "hard_excluded_title_terms", HARD_EXCLUDED_TITLE_TERMS)
+
+
+def senior_title_terms() -> tuple[str, ...]:
+    return config_list("filters", "senior_title_terms", ("senior", "sr.", "sr", "staff", "principal"))
+
+
+def customer_engineering_exception_terms() -> tuple[str, ...]:
+    return config_list(
+        "filters",
+        "customer_engineering_exception_terms",
+        ("sales engineer", "solutions engineer", "solution engineer"),
+    )
+
+
+def suspicious_location_terms() -> tuple[str, ...]:
+    return config_list("location", "suspicious_location_terms", ("international",))
+
+
+def role_term_config_key(role_bucket: str) -> str:
+    return role_bucket.lower().replace("/", "_").replace(" ", "_").replace("-", "_")
+
+
+def configured_role_terms(role_bucket: str, default: Iterable[str]) -> tuple[str, ...]:
+    return config_list("role_terms", role_term_config_key(role_bucket), default)
+
+
+def infrastructure_context_terms() -> tuple[str, ...]:
+    return config_list(
+        "role_context",
+        "infrastructure_context_terms",
+        (
+            "infrastructure",
+            "network",
+            "systems",
+            "system",
+            "platform",
+            "cloud",
+            "linux",
+            "data center",
+            "datacenter",
+            "operations",
+            "support",
+            "security operations",
+            "incident",
+            "monitoring",
+        ),
+    )
+
+
 def preferred_tier_1_companies() -> tuple[str, ...]:
     return config_list("companies", "tier_1", TIER_1_COMPANIES)
 
@@ -615,6 +754,10 @@ def apply_max_difficulty() -> int:
 
 def apply_max_years() -> float:
     return config_float("apply", "max_years", 3.0)
+
+
+def apply_require_live_verification() -> bool:
+    return config_bool("apply", "require_live_verification", False)
 
 
 def utc_now() -> str:
@@ -774,6 +917,62 @@ def fetch_text(
     raise RuntimeError("unreachable retry loop")
 
 
+class PlainTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript", "svg"}:
+            self.skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript", "svg"} and self.skip_depth:
+            self.skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        text = data.strip()
+        if text:
+            self.parts.append(text)
+
+
+def html_to_plain_text(raw_html: str) -> str:
+    stripped = re.sub(
+        r"<(script|style|noscript|svg)\b.*?</\1>",
+        " ",
+        raw_html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    parser = PlainTextExtractor()
+    parser.feed(stripped)
+    text = html.unescape(" ".join(parser.parts))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def html_page_title(raw_html: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", raw_html, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", match.group(1)))).strip()
+
+
+def fetch_page_for_verification(url: str, timeout: int = 18) -> tuple[int, str, str, str]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    req = Request(url, headers=headers)
+    with urlopen(req, timeout=timeout) as response:
+        raw = response.read(2_500_000)
+        charset = response.headers.get_content_charset() or "utf-8"
+        raw_html = raw.decode(charset, errors="replace")
+        return response.status, response.geturl(), html_page_title(raw_html), html_to_plain_text(raw_html)
+
+
 def auth_header_value(token: str, scheme: str) -> str:
     token = token.strip()
     if token.lower().startswith((scheme.lower() + " ")):
@@ -817,6 +1016,33 @@ def source_type_for_job(job: Job) -> str:
 def is_aggregator_url(url: str) -> bool:
     url_lower = url.lower()
     return any(host in url_lower for host in AGGREGATOR_HOST_TERMS)
+
+
+def candidate_apply_urls_for_job(job: Job) -> list[str]:
+    urls: list[str] = []
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value.startswith("http") and value not in urls:
+            urls.append(value)
+
+    if isinstance(job.raw, dict):
+        for key in (
+            "canonical_employer_url",
+            "employer_url",
+            "apply_url",
+            "absolute_url",
+            "hostedUrl",
+            "jobUrl",
+            "externalUrl",
+            "canonical_url",
+            "link",
+        ):
+            add(job.raw.get(key))
+        for option in job.raw.get("apply_options") or []:
+            if isinstance(option, dict):
+                add(option.get("link"))
+    add(job.canonical_url)
+    return urls
 
 
 def canonical_employer_url_for_job(job: Job) -> str:
@@ -891,6 +1117,8 @@ def extract_salary_estimate(job: Job) -> SalaryEstimate:
     if not text:
         return SalaryEstimate(None, None, None, 0)
     normalized = text.lower().replace(",", "")
+    if "predicted" in normalized or "estimated by" in normalized:
+        return SalaryEstimate(None, None, None, 0)
     hourly = "/hr" in normalized or "per hour" in normalized or "hourly" in normalized
     numbers: list[float] = []
 
@@ -935,12 +1163,15 @@ def text_blob(job: Job | sqlite3.Row | dict[str, Any]) -> str:
         if isinstance(raw, dict):
             parts.append(json.dumps(raw, ensure_ascii=True))
     else:
+        keys = job.keys() if hasattr(job, "keys") else job.keys()
+        live_text = str(job["live_page_text"]) if "live_page_text" in keys else ""
         parts = [
             str(job["title"]),
             str(job["company"]),
             str(job["location"]),
             str(job["work_model"]),
             str(job["salary"]),
+            live_text,
             str(job["raw_json"]),
         ]
     return " ".join(part for part in parts if part).lower()
@@ -1113,6 +1344,13 @@ def is_non_us_remote_location(location: str, work_model: str) -> bool:
 
 
 def is_target_location(location: str, work_model: str) -> bool:
+    location_lower = location.lower()
+    if (
+        any(term in location_lower for term in suspicious_location_terms())
+        and not is_seattle_area_location(location)
+        and not is_remote_location(location, work_model)
+    ):
+        return False
     return (
         is_seattle_area_location(location)
         or is_washington_state_location(location)
@@ -1122,12 +1360,19 @@ def is_target_location(location: str, work_model: str) -> bool:
 
 def has_hard_excluded_title(title: str) -> bool:
     title_lower = title.lower()
-    if "sales engineer" in title_lower or "solutions engineer" in title_lower or "solution engineer" in title_lower:
-        if "manager" not in title_lower and not re.search(r"\b(sr|senior|staff|principal)\b", title_lower):
+    if any(term in title_lower for term in customer_engineering_exception_terms()):
+        if (
+            "manager" not in title_lower
+            and "leader" not in title_lower
+            and "head of" not in title_lower
+            and not re.search(r"\b(sr|senior|staff|principal|lead)\b", title_lower)
+        ):
             return False
-    if re.search(r"\b(sr|senior|staff|principal)\b", title_lower):
+    if any(re.search(rf"\b{re.escape(term)}\b", title_lower) for term in senior_title_terms() if term.isalnum()):
         return True
-    return any(term in title_lower for term in HARD_EXCLUDED_TITLE_TERMS)
+    if any(term in title_lower for term in senior_title_terms() if not term.isalnum()):
+        return True
+    return any(term in title_lower for term in hard_excluded_title_terms())
 
 
 def has_invalid_company(company: str) -> bool:
@@ -1136,23 +1381,7 @@ def has_invalid_company(company: str) -> bool:
 
 
 def has_infrastructure_context(blob: str) -> bool:
-    context_terms = (
-        "infrastructure",
-        "network",
-        "systems",
-        "system",
-        "platform",
-        "cloud",
-        "linux",
-        "data center",
-        "datacenter",
-        "operations",
-        "support",
-        "security operations",
-        "incident",
-        "monitoring",
-    )
-    return any(term in blob for term in context_terms)
+    return any(term in blob for term in infrastructure_context_terms())
 
 
 def count_term_hits(blob: str, terms: Iterable[str]) -> list[str]:
@@ -1179,6 +1408,108 @@ def token_set(value: str) -> set[str]:
         for token in re.findall(r"[a-z0-9+#.]+", value.lower())
         if len(token) > 2 and token not in stop
     }
+
+
+def normalized_text_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.lower())
+        if len(token) > 2
+    }
+
+
+def company_match_tokens(company: str) -> set[str]:
+    tokens = normalized_text_tokens(company)
+    return {token for token in tokens if token not in COMPANY_SUFFIX_TOKENS}
+
+
+def title_match_tokens(title: str) -> set[str]:
+    tokens = normalized_text_tokens(re.sub(r"\([^)]*\)", " ", title))
+    return {
+        token
+        for token in tokens
+        if token
+        not in {
+            "engineer",
+            "engineering",
+            "level",
+            "remote",
+            "with",
+            "role",
+            "job",
+            "hiring",
+        }
+    }
+
+
+def has_expired_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in EXPIRED_PAGE_TERMS)
+
+
+def has_clearance_signal(job: Job) -> bool:
+    lowered = text_blob(job)
+    return any(term in lowered for term in CLEARANCE_TERMS)
+
+
+def live_status_for_job(job: Job) -> str:
+    if isinstance(job.raw, dict):
+        return str(job.raw.get("_live_verification_status") or "")
+    return ""
+
+
+def live_concerns_for_job(job: Job) -> str:
+    if isinstance(job.raw, dict):
+        return str(job.raw.get("_live_verification_concerns") or "")
+    return ""
+
+
+def live_page_is_bad(job: Job) -> bool:
+    return live_status_for_job(job) in {"expired", "mismatch", "blocked", "no_text", "failed"}
+
+
+def verification_quality(job: Job, page_text: str, page_title: str) -> tuple[str, int, list[str]]:
+    combined = f"{page_title} {page_text}".lower()
+    concerns: list[str] = []
+    score = 0
+
+    if has_expired_signal(combined):
+        return "expired", -100, ["Expired job page"]
+
+    company_tokens = company_match_tokens(job.company)
+    title_tokens = title_match_tokens(job.title)
+    combined_tokens = normalized_text_tokens(combined[:12000])
+    title_area_tokens = normalized_text_tokens(f"{page_title} {page_text[:2500]}")
+
+    company_hits = company_tokens & combined_tokens
+    title_hits = title_tokens & title_area_tokens
+    title_ratio = len(title_hits) / max(1, len(title_tokens))
+
+    if company_hits:
+        score += 35
+    elif company_tokens:
+        score -= 25
+        concerns.append("Company not found on live page")
+
+    if title_ratio >= 0.5 or len(title_hits) >= min(3, len(title_tokens)):
+        score += 35
+    elif title_tokens:
+        score -= 30
+        concerns.append("Title looks different on live page")
+
+    if job.location and any(token in combined for token in normalized_text_tokens(job.location)):
+        score += 8
+    if len(page_text) < 1200:
+        score -= 25
+        concerns.append("Live page text too short")
+
+    if score >= 40:
+        status = "verified"
+    elif score <= -15 and ("Company not found on live page" in concerns or "Title looks different on live page" in concerns):
+        status = "mismatch"
+    else:
+        status = "unverified"
+    return status, score, concerns
 
 
 def keyword_match_percent(job: Job, profile: ResumeProfile) -> int:
@@ -1210,44 +1541,54 @@ def missing_keywords_for_profile(job: Job, profile: ResumeProfile, limit: int = 
 
 def classify_role(job: Job) -> str:
     title = job.title.lower()
-    if any(term in title for term in ("network engineer", "network automation", "network operations", "noc")):
+    if any(term in title for term in configured_role_terms("Network", ("network engineer", "network automation", "network operations", "noc"))):
         return "Network"
-    if any(term in title for term in ("sre", "site reliability", "devops")):
+    if any(term in title for term in configured_role_terms("DevOps/SRE", ("sre", "site reliability", "devops"))):
         return "DevOps/SRE"
-    if any(term in title for term in ("infrastructure", "data center", "datacenter")):
+    if any(term in title for term in configured_role_terms("Infrastructure", ("infrastructure", "data center", "datacenter"))):
         return "Infrastructure"
-    if any(term in title for term in ("systems engineer", "system engineer", "systems administrator", "sysadmin")):
-        return "Systems"
-    if any(term in title for term in ("operations engineer", "technical operations", "operations technician", "support engineer")):
-        return "Operations"
-    if any(term in title for term in ("sales engineer", "pre-sales", "presales")):
-        return "Sales Engineer"
-    if any(term in title for term in ("solutions engineer", "solution engineer", "customer engineer", "technical account")):
-        return "Solutions"
-    if any(term in title for term in ("cloud engineer", "cloud support", "cloud systems")):
-        return "Cloud"
-    if any(
-        term in title
-        for term in (
-            "software engineer",
-            "software developer",
-            "application developer",
-            "java developer",
-            "frontend",
-            "backend",
-            "full stack",
-        )
-    ):
+    if (
+        any(title.startswith(term) for term in configured_role_terms("SWE", ("software engineer", "software developer")))
+        or "systems development engineer" in title
+    ) and "infrastructure" not in title:
         return "SWE"
-    if "security" in title or "cyber" in title:
+    if any(term in title for term in configured_role_terms("Systems", ("systems engineer", "system engineer", "systems administrator", "sysadmin"))):
+        return "Systems"
+    if any(term in title for term in configured_role_terms("Operations", ("operations engineer", "technical operations", "operations technician", "support engineer"))):
+        return "Operations"
+    if any(term in title for term in configured_role_terms("Sales Engineer", ("sales engineer", "pre-sales", "presales"))):
+        return "Sales Engineer"
+    if any(term in title for term in configured_role_terms("Solutions", ("solutions engineer", "solution engineer", "customer engineer", "technical account"))):
+        return "Solutions"
+    if any(term in title for term in configured_role_terms("Cloud", ("cloud engineer", "cloud support", "cloud systems"))):
+        return "Cloud"
+    if any(term in title for term in configured_role_terms("SWE", ("software engineer", "software developer", "application developer", "java developer", "frontend", "backend", "full stack"))):
+        return "SWE"
+    if any(term in title for term in configured_role_terms("Security", ("security", "cyber"))):
         return "Security"
     return "Other"
 
 
 def resume_profile_for_role(role_bucket: str) -> ResumeProfile:
     if role_bucket in {"Solutions", "Sales Engineer"}:
-        return ResumeProfile("general_technical_solutions", SOLUTIONS_RESUME_TERMS)
-    return ResumeProfile("infrastructure_network", INFRA_RESUME_TERMS)
+        return ResumeProfile(
+            "general_technical_solutions",
+            config_list("resume_profiles", "solutions_terms", SOLUTIONS_RESUME_TERMS),
+        )
+    if role_bucket == "SWE":
+        return ResumeProfile(
+            "software_engineering",
+            config_list("resume_profiles", "swe_terms", INFRA_RESUME_TERMS),
+        )
+    if role_bucket == "Security":
+        return ResumeProfile(
+            "security",
+            config_list("resume_profiles", "security_terms", INFRA_RESUME_TERMS),
+        )
+    return ResumeProfile(
+        "infrastructure_network",
+        config_list("resume_profiles", "infrastructure_network_terms", INFRA_RESUME_TERMS),
+    )
 
 
 def resume_match_percent(job: Job, role_bucket: str) -> int:
@@ -1346,6 +1687,30 @@ def build_concerns(job: Job, role_bucket: str, experience: Experience, resume_ma
         concerns.append("Heavy DevOps/SRE role")
     if role_bucket == "Other":
         concerns.append("Non-target role bucket")
+    live_status = live_status_for_job(job)
+    live_concerns = live_concerns_for_job(job)
+    if live_status == "verified":
+        pass
+    elif live_status == "expired":
+        concerns.append("Expired job page")
+    elif live_status == "mismatch":
+        concerns.append("Live page may be wrong job")
+    elif live_status == "blocked":
+        concerns.append("Live page blocked verification")
+    elif live_status == "no_text":
+        concerns.append("No live page text")
+    elif live_status == "failed":
+        concerns.append("Live page verification failed")
+    elif live_status == "unverified":
+        concerns.append("Live page not fully verified")
+    if live_concerns:
+        concerns.extend(part.strip() for part in live_concerns.split(";") if part.strip())
+    if has_clearance_signal(job):
+        concerns.append("Security clearance required or mentioned")
+    if isinstance(job.raw, dict):
+        live_title = str(job.raw.get("_live_page_title") or "").lower()
+        if "software engineer" in live_title and "infrastructure" not in live_title and "SWE" not in target_role_buckets():
+            concerns.append("Live page title is SWE-heavy")
     if is_non_us_remote_location(job.location, job.work_model):
         concerns.append("Non-US remote")
     if not is_target_location(job.location, job.work_model):
@@ -1362,6 +1727,8 @@ def build_concerns(job: Job, role_bucket: str, experience: Experience, resume_ma
             concerns.append("Business analyst, not engineering")
         elif "director" in title_lower:
             concerns.append("Director-level role")
+        elif "head of" in title_lower:
+            concerns.append("Executive/head role")
         elif "coordinator" in title_lower:
             concerns.append("Coordinator, not engineering")
         elif "account executive" in title_lower:
@@ -1372,6 +1739,8 @@ def build_concerns(job: Job, role_bucket: str, experience: Experience, resume_ma
         concerns.append("Senior title")
     if experience.min_years is not None and experience.min_years >= 5:
         concerns.append("High experience requirement")
+    elif experience.min_years is not None and experience.min_years > apply_max_years():
+        concerns.append("Above target experience")
     if difficulty > 6:
         concerns.append("Hard interview")
     if not job.salary:
@@ -1465,6 +1834,39 @@ def normalized_duplicate_key(job: Job) -> str:
     employer_url = canonical_employer_url_for_job(job)
     if employer_url:
         return "url:" + employer_url.lower().split("?", 1)[0].rstrip("/")
+    return "job:" + normalized_job_identity(job.company, job.title)
+
+
+def normalized_job_identity(company: str, title: str) -> str:
+    company_tokens = sorted(company_match_tokens(company))
+    title_text = re.sub(r"\([^)]*\)", " ", title.lower())
+    title_text = re.sub(r"\b(?:i|ii|iii|iv|v|1|2|3|4|5)\b", " ", title_text)
+    title_text = re.sub(r"[^a-z0-9]+", " ", title_text)
+    title_text = re.sub(r"\s+", " ", title_text).strip()
+    return f"{' '.join(company_tokens)}|{title_text}"
+
+
+def row_duplicate_group_key(row: sqlite3.Row) -> str:
+    return normalized_job_identity(str(row["company"]), str(row["title"]))
+
+
+def row_export_apply_url(row: sqlite3.Row) -> str:
+    return str(row_value(row, "canonical_employer_url") or row_value(row, "live_page_final_url") or row["canonical_url"])
+
+
+def row_live_verified(row: sqlite3.Row) -> bool:
+    return row_live_status(row) == "verified"
+
+
+def row_verification_rank(row: sqlite3.Row) -> tuple[int, int, int]:
+    return (
+        1 if row_live_verified(row) else 0,
+        1 if bool(row_value(row, "verified_on_company_site", 0)) else 0,
+        int(row_value(row, "score", 0) or 0),
+    )
+
+
+def legacy_location_duplicate_key(job: Job) -> str:
     parts = [
         re.sub(r"[^a-z0-9]+", " ", job.company.lower()).strip(),
         re.sub(r"[^a-z0-9]+", " ", job.title.lower()).strip(),
@@ -1494,17 +1896,17 @@ def score_job(job: Job) -> ScoredJob:
         score -= 25
         reasons.append("not target role")
 
-    primary_hits = [term for term in PRIMARY_ROLE_TERMS if term in title]
+    primary_hits = [term for term in primary_role_terms() if term in title]
     if primary_hits:
         score += 50
         reasons.append(f"role: {primary_hits[0]}")
 
-    customer_hits = [term for term in CUSTOMER_ENGINEERING_TERMS if term in title]
+    customer_hits = [term for term in customer_engineering_terms() if term in title]
     if customer_hits:
         score += 38
         reasons.append(f"customer-facing role: {customer_hits[0]}")
 
-    secondary_hits = [term for term in SECONDARY_ROLE_TERMS if term in title]
+    secondary_hits = [term for term in secondary_role_terms() if term in title]
     if secondary_hits:
         score += 20
         reasons.append(f"secondary role: {secondary_hits[0]}")
@@ -1571,8 +1973,11 @@ def score_job(job: Job) -> ScoredJob:
         reasons.append(company_reason)
 
     if salary.score:
-        score += salary.score
-        reasons.append(f"salary score: {salary.score:+d}")
+        salary_bonus = salary.score
+        if resume_match < 10:
+            salary_bonus = min(salary_bonus, 6)
+        score += salary_bonus
+        reasons.append(f"salary score: {salary_bonus:+d}")
 
     source_confidence = source_confidence_for_job(job)
     if source_confidence == "high":
@@ -1630,7 +2035,7 @@ def score_job(job: Job) -> ScoredJob:
         score -= 35
         reasons.append("not target: SWE/app-dev")
 
-    heavy_devops_hits = [term for term in HEAVY_DEVOPS_TERMS if term in blob]
+    heavy_devops_hits = [term for term in heavy_devops_terms() if term in blob]
     if "DevOps/SRE" not in target_role_buckets() and heavy_devops_hits and not primary_hits:
         score -= min(20, 5 * len(heavy_devops_hits))
         reasons.append("heavy DevOps/SRE signal")
@@ -1638,6 +2043,35 @@ def score_job(job: Job) -> ScoredJob:
     if "SWE" not in target_role_buckets() and role_bucket == "SWE" and not has_infrastructure_context(blob):
         score -= 40
         reasons.append("bucket penalty: SWE")
+
+    live_status = live_status_for_job(job)
+    live_title = ""
+    if isinstance(job.raw, dict):
+        live_title = str(job.raw.get("_live_page_title") or "").lower()
+    live_title_swe = "software engineer" in live_title and "infrastructure" not in live_title
+    if "SWE" not in target_role_buckets() and live_title_swe:
+        score -= 70
+        reasons.append("live page title is SWE-heavy")
+
+    if live_status == "verified":
+        score += 8
+        reasons.append("live page verified")
+    elif live_status == "expired":
+        score -= 140
+        reasons.append("expired live page")
+    elif live_status == "mismatch":
+        score -= 100
+        reasons.append("live page mismatch")
+    elif live_status in {"blocked", "failed", "no_text"} and source_confidence_for_job(job) in {"low", "unknown"}:
+        score -= 30
+        reasons.append("unverified low-confidence page")
+    elif live_status == "unverified":
+        score -= 12
+        reasons.append("live page weak match")
+
+    if has_clearance_signal(job):
+        score -= 35
+        reasons.append("clearance concern")
 
     if has_hard_excluded_title(job.title):
         score -= 55
@@ -1707,6 +2141,14 @@ def row_target_bucket(row: sqlite3.Row) -> bool:
     return str(row["role_bucket"]) in target_role_buckets()
 
 
+def row_value(row: sqlite3.Row, key: str, default: Any = "") -> Any:
+    return row[key] if key in row.keys() and row[key] is not None else default
+
+
+def row_live_status(row: sqlite3.Row) -> str:
+    return str(row_value(row, "live_verification_status", ""))
+
+
 def row_passes_preset(
     row: sqlite3.Row,
     *,
@@ -1730,6 +2172,12 @@ def row_passes_preset(
     score = int(row["score"] or 0)
     difficulty = int(row["interview_difficulty"] or 10)
     target_location = row_target_location(row)
+    live_status = row_live_status(row)
+    source_confidence = str(row_value(row, "source_confidence", "unknown"))
+    verified = bool(row_value(row, "verified_on_company_site", 0))
+    min_years = row_value(row, "experience_min_years", None)
+    max_years = row_value(row, "experience_max_years", None)
+    concerns = str(row_value(row, "concerns", "")).lower()
 
     role_is_config_target = role_bucket in target_role_buckets()
     if role_bucket == "Security" and not (role_is_config_target or include_security or role_explicitly_requested):
@@ -1744,6 +2192,8 @@ def row_passes_preset(
         return False
     if not include_non_target and not target_location:
         return False
+    if not include_non_target and live_status in {"expired", "mismatch"}:
+        return False
 
     if preset == "apply":
         required_resume = apply_min_resume_match() if min_resume_match is None else min_resume_match
@@ -1751,6 +2201,18 @@ def row_passes_preset(
         if role_explicitly_requested and role_bucket in non_target_role_buckets():
             return True
         if not role_target_or_explicit(role_bucket, role_explicitly_requested, include_non_target):
+            return False
+        if apply_require_live_verification() and not verified and live_status not in {"verified"}:
+            return False
+        if live_status in {"blocked", "failed", "no_text"} and not verified:
+            return False
+        if "security clearance required or mentioned" in concerns:
+            return False
+        if "live page title is swe-heavy" in concerns:
+            return False
+        if min_years is not None and float(min_years) > apply_max_years():
+            return False
+        if max_years is not None and float(max_years) > apply_max_years():
             return False
         return resume_match >= required_resume and score >= apply_min_score() and difficulty <= required_difficulty
 
@@ -1815,6 +2277,15 @@ def init_db(conn: sqlite3.Connection) -> None:
             why_match TEXT DEFAULT '',
             why_apply TEXT DEFAULT '',
             concerns TEXT DEFAULT '',
+            live_verified_at TEXT DEFAULT '',
+            live_verification_status TEXT DEFAULT '',
+            live_verification_score INTEGER NOT NULL DEFAULT 0,
+            live_verification_concerns TEXT DEFAULT '',
+            live_page_url TEXT DEFAULT '',
+            live_page_final_url TEXT DEFAULT '',
+            live_page_title TEXT DEFAULT '',
+            live_page_hash TEXT DEFAULT '',
+            live_page_text TEXT DEFAULT '',
             content_hash TEXT NOT NULL,
             raw_json TEXT NOT NULL,
             UNIQUE(source, source_job_id)
@@ -1851,6 +2322,15 @@ def init_db(conn: sqlite3.Connection) -> None:
         "qualifications": "ALTER TABLE jobs ADD COLUMN qualifications TEXT DEFAULT ''",
         "applicant_count": "ALTER TABLE jobs ADD COLUMN applicant_count TEXT DEFAULT ''",
         "status_reason": "ALTER TABLE jobs ADD COLUMN status_reason TEXT DEFAULT ''",
+        "live_verified_at": "ALTER TABLE jobs ADD COLUMN live_verified_at TEXT DEFAULT ''",
+        "live_verification_status": "ALTER TABLE jobs ADD COLUMN live_verification_status TEXT DEFAULT ''",
+        "live_verification_score": "ALTER TABLE jobs ADD COLUMN live_verification_score INTEGER NOT NULL DEFAULT 0",
+        "live_verification_concerns": "ALTER TABLE jobs ADD COLUMN live_verification_concerns TEXT DEFAULT ''",
+        "live_page_url": "ALTER TABLE jobs ADD COLUMN live_page_url TEXT DEFAULT ''",
+        "live_page_final_url": "ALTER TABLE jobs ADD COLUMN live_page_final_url TEXT DEFAULT ''",
+        "live_page_title": "ALTER TABLE jobs ADD COLUMN live_page_title TEXT DEFAULT ''",
+        "live_page_hash": "ALTER TABLE jobs ADD COLUMN live_page_hash TEXT DEFAULT ''",
+        "live_page_text": "ALTER TABLE jobs ADD COLUMN live_page_text TEXT DEFAULT ''",
     }
     for column, statement in migrations.items():
         if column not in existing_columns:
@@ -2017,6 +2497,15 @@ def row_to_job(row: sqlite3.Row) -> Job:
         raw = json.loads(row["raw_json"] or "{}")
     except json.JSONDecodeError:
         raw = {}
+    keys = row.keys()
+    live_text = row["live_page_text"] if "live_page_text" in keys else ""
+    if any(key in keys for key in ("live_page_text", "live_verification_status", "live_verification_concerns")):
+        raw["_live_page_text"] = live_text
+        raw["_live_page_title"] = row["live_page_title"] if "live_page_title" in keys else ""
+        raw["_live_page_url"] = row["live_page_url"] if "live_page_url" in keys else ""
+        raw["_live_verification_status"] = row["live_verification_status"] if "live_verification_status" in keys else ""
+        raw["_live_verification_concerns"] = row["live_verification_concerns"] if "live_verification_concerns" in keys else ""
+        raw["_live_verification_score"] = row["live_verification_score"] if "live_verification_score" in keys else 0
     return Job(
         source=row["source"],
         source_job_id=row["source_job_id"],
@@ -2034,64 +2523,147 @@ def row_to_job(row: sqlite3.Row) -> Job:
 def rescore_jobs(conn: sqlite3.Connection) -> int:
     rows = conn.execute("SELECT * FROM jobs").fetchall()
     for row in rows:
-        job = row_to_job(row)
-        scored = score_job(job)
-        experience = extract_experience(job)
-        source_type = source_type_for_job(job)
-        source_confidence = source_confidence_for_job(job)
-        verified_on_company_site = 1 if verified_on_company_site_for_job(job) else 0
-        canonical_employer_url = canonical_employer_url_for_job(job)
-        metadata = richer_board_metadata(job)
-        duplicate_key = normalized_duplicate_key(job)
+        update_scored_row(conn, row)
+    conn.commit()
+    return len(rows)
+
+
+def update_scored_row(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+    job = row_to_job(row)
+    scored = score_job(job)
+    experience = extract_experience(job)
+    source_type = source_type_for_job(job)
+    source_confidence = source_confidence_for_job(job)
+    verified_on_company_site = 1 if verified_on_company_site_for_job(job) else 0
+    canonical_employer_url = canonical_employer_url_for_job(job)
+    metadata = richer_board_metadata(job)
+    duplicate_key = normalized_duplicate_key(job)
+    conn.execute(
+        """
+        UPDATE jobs
+        SET score = ?, why_match = ?, experience_summary = ?,
+            experience_min_years = ?, experience_max_years = ?,
+            role_bucket = ?, estimated_salary = ?, salary_score = ?,
+            interview_difficulty = ?, resume_match = ?,
+            keyword_match = ?, semantic_match = ?, missing_keywords = ?,
+            best_resume_profile = ?, duplicate_key = ?, h1b_sponsorship = ?,
+            company_size = ?, company_industry = ?, seniority = ?,
+            qualifications = ?, applicant_count = ?,
+            why_apply = ?, concerns = ?, source_type = ?,
+            source_confidence = ?, verified_on_company_site = ?,
+            canonical_employer_url = ?
+        WHERE id = ?
+        """,
+        (
+            scored.score,
+            scored.why_match,
+            experience.summary,
+            experience.min_years,
+            experience.max_years,
+            scored.role_bucket,
+            scored.estimated_salary,
+            scored.salary_score,
+            scored.interview_difficulty,
+            scored.resume_match,
+            scored.keyword_match,
+            scored.semantic_match,
+            scored.missing_keywords,
+            scored.best_resume_profile,
+            duplicate_key,
+            metadata["h1b_sponsorship"],
+            metadata["company_size"],
+            metadata["company_industry"],
+            metadata["seniority"],
+            metadata["qualifications"],
+            metadata["applicant_count"],
+            scored.why_apply,
+            scored.concerns,
+            source_type,
+            source_confidence,
+            verified_on_company_site,
+            canonical_employer_url,
+            row["id"],
+        ),
+    )
+
+
+def verify_job(row: sqlite3.Row, *, max_urls: int = 8) -> LiveVerification:
+    job = row_to_job(row)
+    candidates = candidate_apply_urls_for_job(job)
+    best: tuple[str, str, str, str, int] | None = None
+    errors: list[str] = []
+    for url in candidates[:max_urls]:
+        try:
+            status, final_url, page_title, text = fetch_page_for_verification(url)
+        except HTTPError as exc:
+            errors.append(f"{url}: HTTP {exc.code}")
+            continue
+        except (URLError, TimeoutError, OSError, ValueError) as exc:
+            errors.append(f"{url}: {type(exc).__name__}")
+            continue
+        if best is None or len(text) > len(best[3]):
+            best = (url, final_url, page_title, text, status)
+        if len(text) >= 4500:
+            break
+
+    if best is None:
+        status = "blocked" if errors else "no_url"
+        concerns = "; ".join(errors[:3]) if errors else "No candidate apply URL"
+        return LiveVerification(status, "", "", "", "", "", -50, concerns)
+
+    url, final_url, page_title, text, http_status = best
+    if not text:
+        return LiveVerification("no_text", url, final_url, page_title, "", "", -50, "No extracted page text")
+    quality_status, quality_score, concerns = verification_quality(job, text, page_title)
+    text_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    if http_status >= 400 and quality_status == "unverified":
+        quality_status = "blocked"
+        concerns.append(f"HTTP {http_status}")
+    return LiveVerification(
+        quality_status,
+        url,
+        final_url,
+        page_title,
+        text[:60000],
+        text_hash,
+        quality_score,
+        "; ".join(dict.fromkeys(concerns)),
+    )
+
+
+def verify_jobs(conn: sqlite3.Connection, rows: Iterable[sqlite3.Row]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    verified_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    for row in rows:
+        result = verify_job(row)
+        totals[result.status] = totals.get(result.status, 0) + 1
         conn.execute(
             """
             UPDATE jobs
-            SET score = ?, why_match = ?, experience_summary = ?,
-                experience_min_years = ?, experience_max_years = ?,
-                role_bucket = ?, estimated_salary = ?, salary_score = ?,
-                interview_difficulty = ?, resume_match = ?,
-                keyword_match = ?, semantic_match = ?, missing_keywords = ?,
-                best_resume_profile = ?, duplicate_key = ?, h1b_sponsorship = ?,
-                company_size = ?, company_industry = ?, seniority = ?,
-                qualifications = ?, applicant_count = ?,
-                why_apply = ?, concerns = ?, source_type = ?,
-                source_confidence = ?, verified_on_company_site = ?,
-                canonical_employer_url = ?
+            SET live_verified_at = ?, live_verification_status = ?,
+                live_verification_score = ?, live_verification_concerns = ?,
+                live_page_url = ?, live_page_final_url = ?, live_page_title = ?,
+                live_page_hash = ?, live_page_text = ?
             WHERE id = ?
             """,
             (
-                scored.score,
-                scored.why_match,
-                experience.summary,
-                experience.min_years,
-                experience.max_years,
-                scored.role_bucket,
-                scored.estimated_salary,
-                scored.salary_score,
-                scored.interview_difficulty,
-                scored.resume_match,
-                scored.keyword_match,
-                scored.semantic_match,
-                scored.missing_keywords,
-                scored.best_resume_profile,
-                duplicate_key,
-                metadata["h1b_sponsorship"],
-                metadata["company_size"],
-                metadata["company_industry"],
-                metadata["seniority"],
-                metadata["qualifications"],
-                metadata["applicant_count"],
-                scored.why_apply,
-                scored.concerns,
-                source_type,
-                source_confidence,
-                verified_on_company_site,
-                canonical_employer_url,
+                verified_at,
+                result.status,
+                result.score,
+                result.concerns,
+                result.url,
+                result.final_url,
+                result.page_title,
+                result.text_hash,
+                result.text,
                 row["id"],
             ),
         )
+        refreshed = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
+        if refreshed is not None:
+            update_scored_row(conn, refreshed)
     conn.commit()
-    return len(rows)
+    return totals
 
 
 def mark_missing(conn: sqlite3.Connection, source: str, seen_ids: set[str]) -> int:
@@ -3294,10 +3866,16 @@ def query_jobs(
     ]
 
     unique_rows: list[sqlite3.Row] = []
+    by_key: dict[str, sqlite3.Row] = {}
+    for row in filtered_rows:
+        key = row_duplicate_group_key(row)
+        existing = by_key.get(key)
+        if existing is None or row_verification_rank(row) > row_verification_rank(existing):
+            by_key[key] = row
     seen_keys: set[str] = set()
     for row in filtered_rows:
-        key = display_key(row)
-        if key in seen_keys:
+        key = row_duplicate_group_key(row)
+        if key in seen_keys or by_key.get(key) is not row:
             continue
         seen_keys.add(key)
         unique_rows.append(row)
@@ -3454,6 +4032,14 @@ def export_rows(rows: Iterable[sqlite3.Row], output: Path) -> None:
         "source_confidence",
         "verified_on_company_site",
         "canonical_employer_url",
+        "apply_url",
+        "live_verified_at",
+        "live_verification_status",
+        "live_verification_score",
+        "live_verification_concerns",
+        "live_page_url",
+        "live_page_final_url",
+        "live_page_title",
         "role_bucket",
         "interview_difficulty",
         "resume_match",
@@ -3483,7 +4069,9 @@ def export_rows(rows: Iterable[sqlite3.Row], output: Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow({key: row[key] for key in fieldnames})
+            record = {key: row[key] for key in row.keys() if key in fieldnames}
+            record["apply_url"] = row_export_apply_url(row)
+            writer.writerow({key: record.get(key, "") for key in fieldnames})
 
 
 def export_html_report(rows: Iterable[sqlite3.Row], output: Path, title: str = "Job Finder Report") -> None:
@@ -3509,7 +4097,7 @@ def export_html_report(rows: Iterable[sqlite3.Row], output: Path, title: str = "
 
     jobs_data: list[dict[str, Any]] = []
     for row in row_list:
-        apply_url = value(row, "canonical_employer_url") or value(row, "canonical_url")
+        apply_url = value(row, "canonical_employer_url") or value(row, "live_page_final_url") or value(row, "canonical_url")
         jobs_data.append(
             {
                 "id": int_value(row, "id"),
@@ -3535,6 +4123,10 @@ def export_html_report(rows: Iterable[sqlite3.Row], output: Path, title: str = "
                 "sourceType": value(row, "source_type"),
                 "sourceConfidence": value(row, "source_confidence") or "unknown",
                 "verifiedOnCompanySite": bool(int_value(row, "verified_on_company_site")),
+                "liveStatus": value(row, "live_verification_status"),
+                "liveScore": int_value(row, "live_verification_score"),
+                "liveConcerns": value(row, "live_verification_concerns"),
+                "liveTitle": value(row, "live_page_title"),
                 "postedAt": value(row, "posted_at"),
                 "firstSeenAt": value(row, "first_seen_at"),
                 "lastSeenAt": value(row, "last_seen_at"),
@@ -4673,6 +5265,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_args(show)
     show.add_argument("job_id", type=int)
 
+    verify = subparsers.add_parser("verify", help="Fetch public apply pages, store full text verification, and rescore")
+    add_common_args(verify)
+    add_profile_args(verify)
+    verify.add_argument("--limit", type=int, default=50)
+    verify.add_argument("--offset", type=int, default=0)
+    verify.add_argument("--status", default="active")
+    verify.add_argument("--role", default="")
+    verify.add_argument("--source", default="", help="Filter by source name")
+    verify.add_argument("--query", default="")
+    verify.add_argument("--include-stale", action="store_true")
+    verify.add_argument("--stale-days", type=int, default=30)
+    verify.add_argument("--all-locations", action="store_true")
+
     mark = subparsers.add_parser("mark", help="Mark a job status")
     add_common_args(mark)
     mark.add_argument("job_id", type=int)
@@ -4787,6 +5392,25 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "show":
         show_job(conn, args.job_id)
+        return 0
+
+    if args.command == "verify":
+        rows = query_jobs(
+            conn,
+            query=args.query,
+            status=args.status,
+            limit=args.limit,
+            offset=args.offset,
+            include_stale=args.include_stale,
+            stale_days=args.stale_days,
+            target_only=not args.all_locations,
+            role=args.role,
+            preset="custom",
+            source=args.source,
+        )
+        totals = verify_jobs(conn, rows)
+        summary = ", ".join(f"{key}={value}" for key, value in sorted(totals.items())) or "none"
+        print(f"Verified {len(rows)} jobs: {summary}")
         return 0
 
     if args.command == "mark":

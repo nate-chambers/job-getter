@@ -100,6 +100,47 @@ class JobFinderTests(unittest.TestCase):
             )
         )
 
+    def test_role_terms_and_filters_are_configurable(self):
+        job_finder.USER_CONFIG = {
+            "roles": {"target_buckets": ["Security"]},
+            "role_terms": {"security": ["patrol officer"]},
+            "filters": {
+                "hard_excluded_title_terms": ["armed"],
+                "senior_title_terms": ["supervisor"],
+                "customer_engineering_exception_terms": [],
+            },
+            "resume_profiles": {"security_terms": ["patrol", "access control", "incident report"]},
+        }
+        patrol = job_finder.Job(
+            source="test",
+            source_job_id="patrol",
+            canonical_url="https://example.com/patrol",
+            title="Patrol Officer",
+            company="Acme Security",
+            raw={"description": "Patrol access control incident report"},
+        )
+        armed = job_finder.Job(
+            source="test",
+            source_job_id="armed",
+            canonical_url="https://example.com/armed",
+            title="Armed Patrol Officer",
+            company="Acme Security",
+        )
+        self.assertEqual(job_finder.classify_role(patrol), "Security")
+        self.assertGreater(job_finder.resume_match_percent(patrol, "Security"), 50)
+        self.assertTrue(job_finder.has_hard_excluded_title(armed.title))
+
+    def test_suspicious_location_terms_are_configurable(self):
+        job_finder.USER_CONFIG = {
+            "location": {
+                "target_cities": ["seattle"],
+                "target_region_terms": ["king county", "wa", "washington"],
+                "suspicious_location_terms": ["international"],
+            }
+        }
+        self.assertFalse(job_finder.is_target_location("International, King County", "On Site"))
+        self.assertTrue(job_finder.is_target_location("Seattle, WA", "On Site"))
+
     def test_newgrad_next_data_extraction(self):
         html = (
             '<html><script id="__NEXT_DATA__" type="application/json">'
@@ -1018,7 +1059,107 @@ class JobFinderTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
         self.assertIn("why_apply", text.splitlines()[0])
         self.assertIn("concerns", text.splitlines()[0])
+        self.assertIn("apply_url", text.splitlines()[0])
+        self.assertIn("live_verification_status", text.splitlines()[0])
         self.assertIn("Strong fit:", text)
+
+    def test_verify_live_page_updates_experience_and_excludes_too_senior(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        job_finder.init_db(conn)
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        job = job_finder.Job(
+            source="newgrad",
+            source_job_id="too-senior",
+            canonical_url="https://example.com/network",
+            title="Network Engineer",
+            company="Acme Networks",
+            location="Seattle, WA",
+            salary="$120000-$150000/yr",
+            raw={"description": "Linux networking Python DNS troubleshooting monitoring"},
+        )
+        job_finder.upsert_job(conn, job, now)
+        original_fetch = job_finder.fetch_page_for_verification
+        try:
+            job_finder.fetch_page_for_verification = lambda url: (
+                200,
+                url,
+                "Network Engineer - Acme Networks",
+                "Acme Networks is hiring a Network Engineer in Seattle. Minimum 7 years of experience "
+                "with Linux, routing, switching, TCP/IP, DNS, Python, and monitoring.",
+            )
+            row = conn.execute("SELECT * FROM jobs").fetchone()
+            totals = job_finder.verify_jobs(conn, [row])
+        finally:
+            job_finder.fetch_page_for_verification = original_fetch
+        self.assertEqual(totals, {"verified": 1})
+        updated = conn.execute("SELECT * FROM jobs").fetchone()
+        self.assertEqual(updated["live_verification_status"], "verified")
+        self.assertEqual(updated["experience_min_years"], 7)
+        self.assertIn("High experience requirement", updated["concerns"])
+        self.assertEqual(job_finder.query_jobs(conn, limit=10, include_stale=True, preset="apply"), [])
+
+    def test_verify_expired_page_excludes_apply(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        job_finder.init_db(conn)
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        job = job_finder.Job(
+            source="newgrad",
+            source_job_id="expired",
+            canonical_url="https://example.com/expired",
+            title="Network Operations Engineer",
+            company="SpaceX",
+            location="Redmond, WA",
+            salary="$120000-$150000/yr",
+            raw={"description": "Linux Starlink wireless networking VPN Grafana Python monitoring troubleshooting DNS"},
+        )
+        job_finder.upsert_job(conn, job, now)
+        original_fetch = job_finder.fetch_page_for_verification
+        try:
+            job_finder.fetch_page_for_verification = lambda url: (
+                200,
+                url,
+                "Network Operations Engineer",
+                "Job Expired. SpaceX Network Operations Engineer Starlink Linux networking Python.",
+            )
+            row = conn.execute("SELECT * FROM jobs").fetchone()
+            totals = job_finder.verify_jobs(conn, [row])
+        finally:
+            job_finder.fetch_page_for_verification = original_fetch
+        self.assertEqual(totals, {"expired": 1})
+        updated = conn.execute("SELECT * FROM jobs").fetchone()
+        self.assertEqual(updated["live_verification_status"], "expired")
+        self.assertIn("Expired job page", updated["concerns"])
+        self.assertEqual(job_finder.query_jobs(conn, limit=10, include_stale=True, preset="apply"), [])
+
+    def test_query_dedupes_same_company_title_across_locations_and_sources(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        job_finder.init_db(conn)
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        first = job_finder.Job(
+            source="linkedin",
+            source_job_id="one",
+            canonical_url="https://linkedin.example/1",
+            title="Network Operations Engineer (Starlink)",
+            company="SpaceX",
+            location="Redmond, WA",
+            raw={"description": "Linux Starlink wireless networking VPN Grafana Python monitoring troubleshooting DNS"},
+        )
+        second = job_finder.Job(
+            source="adzuna",
+            source_job_id="two",
+            canonical_url="https://adzuna.example/2",
+            title="Network Operations Engineer (Starlink)",
+            company="SpaceX",
+            location="Redmond, King County",
+            raw={"description": "Linux Starlink wireless networking VPN Grafana Python monitoring troubleshooting DNS"},
+        )
+        job_finder.upsert_job(conn, first, now)
+        job_finder.upsert_job(conn, second, now)
+        rows = job_finder.query_jobs(conn, limit=10, include_stale=True, preset="review")
+        self.assertEqual(len(rows), 1)
 
     def test_github_markdown_collector_parses_table(self):
         source = {

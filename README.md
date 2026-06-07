@@ -39,6 +39,7 @@ Edit `.env` and add only the API keys you have. Then run:
 
 ```powershell
 python .\job_finder.py sync
+python .\job_finder.py verify --limit 120 --include-stale --all-locations
 python .\job_finder.py queue --limit 50
 python .\job_finder.py report --output jobs.html --title "Apply-First Job Queue"
 ```
@@ -58,12 +59,25 @@ Edit it for:
 - Target cities and regions
 - Remote rules
 - Target role buckets
+- Role bucket title terms
+- Hard-excluded title terms
 - Experience limits
 - Resume-match threshold
 - Interview-difficulty threshold
 - Skills and strengths that should score higher
 - Negative terms that should score lower
+- Resume-match profile terms
 - Preferred companies
+
+Useful TOML sections:
+
+- `[location]`: target cities, target regions, remote rules, and suspicious location terms.
+- `[roles]`: which buckets are apply-first targets.
+- `[role_terms]`: title phrases that classify jobs into buckets like `swe`, `security`, `network`, or `operations`.
+- `[filters]`: hard title exclusions and senior-title terms.
+- `[scoring]`: positive, negative, strength, primary-role, secondary-role, and heavy-DevOps terms.
+- `[resume_profiles]`: resume-match terms for infrastructure, solutions, SWE, or security-style searches.
+- `[companies]`: preferred companies and industries.
 
 There is an example for a friend who wants SWE and adjacent roles around Portland:
 
@@ -71,11 +85,18 @@ There is an example for a friend who wants SWE and adjacent roles around Portlan
 examples/portland_swe.toml
 ```
 
+There is also a non-tech example for security patrol/officer roles:
+
+```text
+examples/security_patrol.toml
+```
+
 Use it like this:
 
 ```powershell
 python .\job_finder.py queue --config examples\portland_swe.toml --limit 50
 python .\job_finder.py report --config examples\portland_swe.toml --output jobs.html --title "Portland SWE Jobs"
+python .\job_finder.py report --config examples\security_patrol.toml --output jobs.html --title "Security Patrol Jobs"
 ```
 
 You should also edit `sources.json` so the enabled sources and search queries match the new person. For Portland SWE, change broad API queries toward:
@@ -179,6 +200,7 @@ SerpAPI can consume paid credits. It is disabled by default.
 
 ```powershell
 python .\job_finder.py sync
+python .\job_finder.py verify --limit 120 --include-stale --all-locations
 python .\job_finder.py queue --limit 50
 python .\job_finder.py search --query "linux networking"
 python .\job_finder.py show 123
@@ -232,6 +254,10 @@ For the default Nate config, `jobs.csv` and `jobs.html` require:
 - Interview difficulty at or below the TOML threshold
 - Experience requirement at or below the TOML threshold
 - No hard-excluded titles
+- Live page verification when `require_live_verification = true`
+- No expired or mismatched live job pages
+
+The `verify` command fetches public apply pages already stored in SQLite, extracts full page text, stores verification status, updates experience/salary/title evidence, and rescoring uses that live text. Predicted salaries from aggregators are treated as weak evidence and do not add salary score.
 
 For a different person, edit `job_getter.toml`; if SWE is listed in `roles.target_buckets`, SWE can appear in apply-first results.
 

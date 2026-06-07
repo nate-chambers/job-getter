@@ -1,0 +1,101 @@
+[profile]
+name = "Security patrol search"
+summary = "Entry-level security officer, patrol officer, and site safety roles in a chosen metro."
+
+[location]
+target_metro_label = "Portland area"
+target_region_label = "Oregon / SW Washington"
+target_cities = ["portland", "beaverton", "hillsboro", "vancouver", "gresham"]
+target_region_terms = ["or", "oregon", "washington county", "multnomah county", "clark county"]
+remote_us_terms = ["remote", "united states", "usa", "us"]
+non_us_remote_terms = ["india", "canada", "europe", "emea", "apac", "latam", "united kingdom", "uk"]
+excluded_location_terms = ["washington dc", "district of columbia"]
+suspicious_location_terms = ["international"]
+
+[roles]
+target_buckets = ["Security", "Operations", "Other"]
+
+[role_terms]
+security = [
+  "security officer",
+  "security guard",
+  "patrol officer",
+  "patrol security",
+  "security patrol",
+  "public safety officer",
+  "loss prevention",
+  "access control",
+]
+operations = ["site operations", "operations associate", "dispatch", "field operations"]
+
+[filters]
+senior_title_terms = ["senior", "sr.", "supervisor", "manager", "director"]
+hard_excluded_title_terms = [
+  "cybersecurity",
+  "security engineer",
+  "security analyst",
+  "account executive",
+  "business analyst",
+  "project manager",
+]
+customer_engineering_exception_terms = []
+
+[apply]
+max_years = 2
+min_resume_match = 3
+min_score = 35
+max_interview_difficulty = 5
+require_live_verification = false
+
+[scoring]
+user_strength_terms = [
+  "patrol",
+  "access control",
+  "incident report",
+  "customer service",
+  "de-escalation",
+  "surveillance",
+  "safety",
+  "dispatch",
+]
+positive_terms = [
+  "security officer",
+  "security guard",
+  "patrol",
+  "access control",
+  "incident report",
+  "customer service",
+  "de-escalation",
+  "entry level",
+  "no experience",
+]
+negative_terms = [
+  "cybersecurity",
+  "security engineer",
+  "security analyst",
+  "armed",
+  "manager",
+  "supervisor",
+  "5+ years",
+]
+primary_role_terms = ["security officer", "security guard", "patrol officer", "public safety officer"]
+secondary_role_terms = ["dispatcher", "loss prevention", "site safety"]
+customer_engineering_terms = []
+heavy_devops_terms = []
+
+[resume_profiles]
+security_terms = [
+  "patrol",
+  "access control",
+  "incident report",
+  "customer service",
+  "de-escalation",
+  "surveillance",
+  "safety",
+  "dispatch",
+]
+
+[companies]
+tier_1 = []
+tier_2 = []
+interesting_terms = ["campus", "hospital", "public safety", "site security"]

@@ -30,6 +30,33 @@ excluded_location_terms = ["washington dc", "district of columbia"]
 [roles]
 target_buckets = ["SWE", "Cloud", "DevOps/SRE", "Infrastructure", "Systems", "Operations"]
 
+[role_terms]
+swe = [
+  "software engineer",
+  "software developer",
+  "backend",
+  "frontend",
+  "full stack",
+  "full-stack",
+  "web developer",
+  "application developer",
+]
+cloud = ["cloud engineer", "cloud support", "cloud systems", "platform engineer"]
+devops_sre = ["sre", "site reliability", "devops", "platform engineer"]
+infrastructure = ["infrastructure", "platform infrastructure"]
+systems = ["systems engineer", "system engineer"]
+operations = ["operations engineer", "technical support engineer"]
+
+[filters]
+senior_title_terms = ["senior", "sr.", "sr", "staff", "principal"]
+hard_excluded_title_terms = [
+  "director",
+  "manager",
+  "project manager",
+  "program manager",
+  "account executive",
+]
+
 [apply]
 max_years = 3
 min_resume_match = 3
@@ -82,6 +109,22 @@ negative_terms = [
   "7+ years",
   "10+ years",
   "unpaid",
+]
+
+[resume_profiles]
+swe_terms = [
+  "python",
+  "javascript",
+  "typescript",
+  "react",
+  "node",
+  "sql",
+  "api",
+  "aws",
+  "docker",
+  "linux",
+  "testing",
+  "debugging",
 ]
 
 [companies]
